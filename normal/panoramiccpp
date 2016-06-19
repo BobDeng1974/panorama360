@@ -1,0 +1,1071 @@
+#include <linux/fb.h>
+#include <pthread.h>
+#include <linux/videodev2.h>
+#include "drv_display.h"
+#include "g2d_driver.h"
+#include <stdio.h>
+#include <sys/ioctl.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <malloc.h>
+#include <signal.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <opencv2/opencv.hpp>
+#include <opencv2/opencv_modules.hpp>
+#include <time.h>
+#include <semaphore.h>
+#include "./Api/Api.h"
+#include <EGL/egl.h>
+#include <GLES2/gl2.h>
+
+//valiables of mali
+#define WIDTH 300
+#define HEIGHT 480
+static const char *vertex_shader_source =
+    "attribute highp vec4 myVertex;    \n"
+	"attribute mediump vec4 myUV;      \n"
+	"                                  \n"
+	"varying vec2 myTexCoord;          \n"
+	"                                  \n"
+	"void main(void)                   \n"
+	"{                                 \n"
+	"    gl_Position = myVertex;       \n"
+	"	 myTexCoord=myUV.st;		   \n"
+	"}                                 \n";
+
+static const char *fragment_shader_source = 
+    "precision highp float;						   		  \n"
+	"uniform sampler2D sampler2d_image;			              \n"
+	"uniform sampler2D sampler2d_front;                       \n"
+    "uniform sampler2D sampler2d_rear;			              \n"
+    "uniform sampler2D sampler2d_left;			              \n"
+    "uniform sampler2D sampler2d_right;			              \n"
+	"														  \n"
+	"varying mediump vec2 myTexCoord;						  \n"
+	"														  \n"
+	"void main(void)                                          \n"
+	"{                                                        \n"
+	"	highp float frontweight,rearweight,leftweight,rightweight;    \n"
+	"	highp float frontsrcx,frontsrcy,rearsrcx,rearsrcy;          \n"
+	"	highp float leftsrcx,leftsrcy,rightsrcx,rightsrcy;	 \n"			 
+	"   vec4 frontwvec,rearwvec,leftwvec,rightwvec;			  \n"
+	"	vec4 frontval,rearval,leftval,rightval;				  \n"
+	"	vec4 tmpfrontxvec,tmpfrontyvec,tmprearxvec,tmprearyvec;\n"
+	"	vec4 tmpleftxvec,tmpleftyvec,tmprightxvec,tmprightyvec;\n"
+	"														  \n"
+	"														  \n"
+	"	frontwvec=texture2D(sampler2d_front,vec2((gl_FragCoord.x+300.0*2.0)/900.0,(480.0-gl_FragCoord.y)/480.0));										  \n"
+	"	rearwvec=texture2D(sampler2d_rear,vec2((gl_FragCoord.x+300.0*2.0)/900.0,(480.0-gl_FragCoord.y)/480.0));											  \n"
+	"	leftwvec=texture2D(sampler2d_left,vec2((gl_FragCoord.x+300.0*2.0)/900.0,(480.0-gl_FragCoord.y)/480.0));											  \n"
+	"	rightwvec=texture2D(sampler2d_right,vec2((gl_FragCoord.x+300.0*2.0)/900.0,(480.0-gl_FragCoord.y)/480.0));										  \n"
+	"														  \n"
+	"	frontweight=frontwvec.x*255.0+frontwvec.y*255.0*256.0;			  \n"
+	"	rearweight=rearwvec.x*255.0+rearwvec.y*255.0*256.0;				  \n"
+	"	leftweight=leftwvec.x*255.0+leftwvec.y*255.0*256.0;	  \n"
+	"	rightweight=rightwvec.x*255.0+rightwvec.y*255.0*256.0;	  \n"
+	"														  \n"
+	"	if(frontweight<1.0)									  \n"
+	"		frontval=vec4(0.0,0.0,0.0,0.0);					  \n"
+	"	else												  \n"
+	"	{													  \n"
+	"		tmpfrontxvec=texture2D(sampler2d_front,vec2(gl_FragCoord.x/900.0,(480.0-gl_FragCoord.y)/480.0));										  \n"
+	"		tmpfrontyvec=texture2D(sampler2d_front,vec2((gl_FragCoord.x+300.0)/900.0,(480.0-gl_FragCoord.y)/480.0));								  \n"
+	"		frontsrcx=tmpfrontxvec.x*0.249+tmpfrontxvec.y*63.75+tmpfrontxvec.z*16320.0;	 \n"
+	"		frontsrcy=tmpfrontyvec.x*0.249+tmpfrontyvec.y*63.75+tmpfrontyvec.z*16320.0;	 \n"
+	"		frontval=texture2D(sampler2d_image,vec2(frontsrcx/1440.0,frontsrcy/960.0));								  \n"
+	"	}													  \n"
+	"														  \n"
+	"	if(rearweight<1.0)									  \n"
+	"		rearval=vec4(0.0,0.0,0.0,0.0);					  \n"
+	"	else												  \n"
+	"	{													  \n"
+	"		tmprearxvec=texture2D(sampler2d_rear,vec2(gl_FragCoord.x/900.0,(480.0-gl_FragCoord.y)/480.0));											  \n"
+	"		tmprearyvec=texture2D(sampler2d_rear,vec2((gl_FragCoord.x+300.0)/900.0,(480.0-gl_FragCoord.y)/480.0));									  \n"
+	"		rearsrcx=tmprearxvec.x*0.249+tmprearxvec.y*63.75+tmprearxvec.z*16320.0;			  \n"
+	"		rearsrcy=tmprearyvec.x*0.249+tmprearyvec.y*63.75+tmprearyvec.z*16320.0;			  \n"
+	"		rearval=texture2D(sampler2d_image,vec2(rearsrcx/1440.0,rearsrcy/960.0));												  \n"
+	"	}													  \n"
+	"	if(leftweight<1.0)									  \n"
+	"		leftval=vec4(0.0,0.0,0.0,0.0);					  \n"
+	"	else												  \n"
+	"	{													  \n"
+	"		tmpleftxvec=texture2D(sampler2d_left,vec2(gl_FragCoord.x/900.0,(480.0-gl_FragCoord.y)/480.0));											  \n"
+	"		tmpleftyvec=texture2D(sampler2d_left,vec2((gl_FragCoord.x+300.0)/900.0,(480.0-gl_FragCoord.y)/480.0));									  \n"
+	"		leftsrcx=tmpleftxvec.x*0.249+tmpleftxvec.y*63.75+tmpleftxvec.z*16320.0;		      \n"
+	"		leftsrcy=tmpleftyvec.x*0.249+tmpleftyvec.y*63.75+tmpleftyvec.z*16320.0;			  \n"
+	"		leftval=texture2D(sampler2d_image,vec2(leftsrcx/1440.0,leftsrcy/960.0));												  \n"
+	"	}													  \n"
+	"	if(rightweight<1.0)									  \n"
+	"		rightval=vec4(0.0,0.0,0.0,0.0);					  \n"
+	"	else												  \n"
+	"	{													  \n"
+	"		tmprightxvec=texture2D(sampler2d_right,vec2(gl_FragCoord.x/900.0,(480.0-gl_FragCoord.y)/480.0));										  \n"
+	"		tmprightyvec=texture2D(sampler2d_right,vec2((gl_FragCoord.x+300.0)/900.0,(480.0-gl_FragCoord.y)/480.0));									  \n"
+	"		rightsrcx=tmprightxvec.x*0.249+tmprightxvec.y*63.75+tmprightxvec.z*16320.0;		  \n"
+	"		rightsrcy=tmprightyvec.x*0.249+tmprightyvec.y*63.75+tmprightyvec.z*16320.0;		  \n"
+	"		rightval=texture2D(sampler2d_image,vec2(rightsrcx/1440.0,rightsrcy/960.0));								  \n"
+	"	}												  \n"
+	"   gl_FragColor.x=(frontweight*frontval.x+rearweight*rearval.x+leftweight*leftval.x+rightweight*rightval.x)/256.0;						  \n"
+	"   gl_FragColor.y=(frontweight*frontval.y+rearweight*rearval.y+leftweight*leftval.y+rightweight*rightval.y)/256.0;						  \n"
+	"   gl_FragColor.z=(frontweight*frontval.z+rearweight*rearval.z+leftweight*leftval.z+rightweight*rightval.z)/256.0;						  \n"
+	"   gl_FragColor.w=1.0;									  \n"
+	"}													      \n";
+
+//static GLfloat vVertices[] = {  -1.0f, 1.0f, 0.0f,
+//	                             1.0f, 1.0f, 0.0f,
+//					            -1.0f, -1.0f, 0.0f,
+//								1.0f, -1.0, 0.0f};
+//
+//static GLfloat vTextureCoords[] = {0.0f, 1.0f, 
+//								   1.0f, 1.0f, 
+//					               0.0f, 0.0f,
+//							       1.0f, 0.0f};
+
+static EGLint const config_attribute_list[] = {
+	    EGL_RED_SIZE, 8,
+		EGL_GREEN_SIZE, 8,
+		EGL_BLUE_SIZE, 8,
+		EGL_ALPHA_SIZE, 8,
+		EGL_BUFFER_SIZE, 32,
+
+		EGL_STENCIL_SIZE, 0,
+		EGL_DEPTH_SIZE, 0,
+
+		EGL_SAMPLES, 4,
+
+		EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+
+		EGL_SURFACE_TYPE, EGL_WINDOW_BIT | EGL_PIXMAP_BIT,
+
+
+		EGL_NONE
+};
+
+static EGLint window_attribute_list[] = {
+	    EGL_NONE
+};
+
+static const EGLint context_attribute_list[] = {
+	    EGL_CONTEXT_CLIENT_VERSION, 2,
+		EGL_NONE
+};
+
+GLuint m_uiTexture[5];
+EGLDisplay egl_display;
+EGLSurface egl_surface;
+GLint ewidth, eheight;
+EGLint egl_major, egl_minor;
+EGLConfig config;
+EGLint num_config;
+EGLContext context;
+GLuint vertex_shader;
+GLuint fragment_shader;
+GLuint program;
+GLint ret;
+GLuint m_ui32Vbo;
+struct mali_native_window native_window;
+unsigned int m_ui32VertexStride;
+char*texturebuf;
+
+int maliInit();
+
+int id;
+int ustime;
+int flag=0;
+pthread_t t[4];
+pthread_t readbuf;
+
+unsigned int *front,*rear,*left,*right;
+unsigned char *cfront,*crear,*cleft,*cright;
+//unsigned int *frontcoordinatexMat,*frontcoordinateyMat,*frontweightMat,*rearcoordinatexMat,*rearcoordinateyMat,*rearweightMat,*leftcoordinatexMat,*leftcoordinateyMat,*leftweightMat,*rightcoordinatexMat,*rightcoordinateyMat,*rightweightMat;
+
+unsigned char *tmpbuf = NULL;
+unsigned char *addr = NULL;
+unsigned char *otheraddr = NULL;
+
+//struct para
+//{
+//	int x;
+//	int y;
+//};
+
+
+//sem_t sem;  //use to wake up the four threads
+//sem_t sem_fin;  //use to wake up main thread
+
+struct size 
+{
+    int width;
+    int height;
+}disp_size;
+
+struct buffer
+{
+    char * start;
+    size_t length;
+    int index;
+};
+
+struct buffer * buffers=NULL;
+static unsigned int n_buffers =0;
+
+int fd_g2d;
+int fd_video;
+int fd_fb;
+int fd_mem;
+int srectx[4]={0,720,0,720};
+int srecty[4]={0,0,480,480};
+int drectx[4]={0,1440,0,1440};
+int drecty[4]={0,0,960,960};
+
+
+g2d_blt tmp;
+g2d_stretchblt str;
+
+#define TV_WIDTH 720
+#define TV_HEIGHT 480
+#define BUF_NUM  5
+#define KERNEL_PHY_ADDR  0x48000000
+//#define KERNEL_PHY_ADDR1  0x46000000
+
+__u32 paddr;
+__u32 potheraddr = KERNEL_PHY_ADDR;
+//__u32 potheraddr1= KERNEL_PHY_ADDR1; 
+
+bool TestEGLError(const char* pszLocation)
+{
+	EGLint iErr = eglGetError();
+	if(iErr != EGL_SUCCESS)
+	{
+		printf("%s failed (%d) .\n",pszLocation,(int) iErr);
+		return false;
+	}
+	return true;
+}
+
+int separateimage(IplImage* im1,IplImage* im2,IplImage* im3,IplImage* im4,unsigned char* pbigimage)
+{
+	int i;
+	for(i=0;i<480;i++)
+	{
+		memcpy(im1->imageData+720*4*i,pbigimage+1440*4*i,720*4);
+		memcpy(im2->imageData+720*4*i,pbigimage+1440*4*i+720*4,720*4);
+		memcpy(im3->imageData+720*4*i,pbigimage+1440*4*(i+480),720*4);
+		memcpy(im4->imageData+720*4*i,pbigimage+1440*4*(i+480)+720*4,720*4);
+	}
+	return 0;
+}
+
+int separateimgbuf(unsigned char* im1,unsigned char * im2,unsigned char *im3,unsigned char *im4,unsigned char *pbigimage)
+{
+	int i;
+	for(i=0;i<480;i++)
+	{
+		memcpy(im1+720*4*i,pbigimage+1440*4*i,720*4);
+		memcpy(im2+720*4*i,pbigimage+1440*4*i+720*4,720*4);
+		memcpy(im3+720*4*i,pbigimage+1440*4*(i+480),720*4);
+		memcpy(im4+720*4*i,pbigimage+1440*4*(i+480)+720*4,720*4);
+	}
+}
+
+int separateimgbufstr(unsigned char* im1,unsigned char * im2,unsigned char *im3,unsigned char *im4,unsigned char *pbigimage)
+{
+	int i;
+	for(i=0;i<960;i++)
+	{
+		memcpy(im1+1440*4*i,pbigimage+2880*4*i,1440*4);
+		memcpy(im2+1440*4*i,pbigimage+2880*4*i+1440*4,1440*4);
+		memcpy(im3+1440*4*i,pbigimage+2880*4*(i+960),1440*4);
+		memcpy(im4+1440*4*i,pbigimage+2880*4*(i+960)+1440*4,1440*4);
+	}
+}
+
+
+int combineimage(IplImage* im1,IplImage* im2,IplImage* im3,IplImage* im4,unsigned char *pbigimage)
+{
+	int i;
+	for(i=0;i<480;i++)
+	{
+		memcpy(pbigimage+1440*4*i,im1->imageData+720*4*i,720*4);
+		memcpy(pbigimage+1440*4*i+720*4,im2->imageData+720*4*i,720*4);
+		memcpy(pbigimage+1440*4*(i+480),im3->imageData+720*4*i,720*4);
+		memcpy(pbigimage+1440*4*(i+480)+720*4,im4->imageData+720*4*i,720*4);
+	}
+	return 0;
+}
+
+//color space coversion g2d
+//
+int nv12toargb(int w,int h,__u32 pnv,__u32 potherad)
+{
+	
+	tmp.flag               =G2D_BLT_NONE;
+	tmp.src_image.addr[0]  =pnv;
+	tmp.src_image.addr[1]  =pnv+w*h;
+	tmp.src_image.w        =w;
+	tmp.src_image.h        =h;
+	tmp.src_image.format   =G2D_FMT_PYUV420UVC;
+	tmp.src_image.pixel_seq=G2D_SEQ_NORMAL;
+	tmp.src_rect.x         =0;
+	tmp.src_rect.y		   =0;
+	tmp.src_rect.w         =w;
+	tmp.src_rect.h         =h;
+    tmp.dst_image.addr[0]  =potherad;
+	tmp.dst_image.w        =w;
+	tmp.dst_image.h		   =h;
+	tmp.dst_image.format   =G2D_FMT_XBGR8888;//for GPU; G2D_FMT_XRGB for FB
+	tmp.dst_image.pixel_seq=G2D_SEQ_NORMAL;
+	tmp.dst_x              =0; 
+	tmp.dst_y              =0;
+	tmp.color              =0;
+	tmp.alpha              =0;
+
+	if(ioctl(fd_g2d,G2D_CMD_BITBLT,&tmp)<0)
+	{
+		printf("error bitblt\n");
+		return -1;
+	}
+	return 0;
+}
+
+int nv12toargbstr(int w,int h,__u32 pnv,__u32 potherad)
+{
+	tmp.flag                 = G2D_BLT_FLIP_HORIZONTAL;
+	str.src_image.addr[0]    = pnv;
+	str.src_image.addr[1]    = pnv+w*h;
+	str.src_image.w			 = w;
+	str.src_image.h			 = h;
+	str.src_image.format	 = G2D_FMT_PYUV420UVC;
+	str.src_image.pixel_seq  = G2D_SEQ_NORMAL;
+	str.src_rect.x			 = 0;
+	str.src_rect.y			 = 0;
+	str.src_rect.w			 = w;
+	str.src_rect.h			 = h;
+	str.dst_image.addr[0]    = potherad;
+	str.dst_image.w			 = w*2;
+	str.dst_image.h			 = h*2;
+	str.dst_image.format     = G2D_FMT_XBGR8888;
+	str.dst_image.pixel_seq  = G2D_SEQ_NORMAL;
+	str.dst_rect.x			 = 0;
+	str.dst_rect.y			 = 0;
+	str.dst_rect.w			 = w*2;
+	str.dst_rect.h			 = h*2;
+	str.color				 = 0;
+	str.alpha                = 0;
+	if(ioctl(fd_g2d,G2D_CMD_STRETCHBLT,&str)<0)
+	{
+		printf("stretch blt failed!\n");
+		return -1;
+	}
+	return 0;
+}
+
+int nv12toargbstr1(int w,int h,__u32 pnv,__u32 potherad)
+{
+	for(int i=0;i<4;i++)
+	{
+		str.flag				 = G2D_BLT_NONE;
+		str.src_image.addr[0]    = pnv;
+		str.src_image.addr[1]    = pnv+w*h;
+		str.src_image.w			 = w;
+		str.src_image.h			 = h;
+		str.src_image.format	 = G2D_FMT_PYUV420UVC;
+		str.src_image.pixel_seq  = G2D_SEQ_NORMAL;
+		str.src_rect.x			 = 0;
+		str.src_rect.y			 = 0;
+		str.src_rect.w			 = w/2;
+		str.src_rect.h			 = h/2;
+		str.dst_image.addr[0]    = potherad;
+		str.dst_image.w			 = w*2;
+		str.dst_image.h			 = h*2;
+		str.dst_image.format     = G2D_FMT_XBGR8888;
+		str.dst_image.pixel_seq  = G2D_SEQ_NORMAL;
+		str.dst_rect.x			 = 0;
+		str.dst_rect.y			 = 0;
+		str.dst_rect.w			 = w;
+		str.dst_rect.h			 = h;
+		str.color				 = 0;
+		str.alpha                = 0;
+
+		str.src_rect.x=srectx[i];
+		str.src_rect.y=srecty[i];
+		str.dst_rect.x=drectx[i];
+		str.dst_rect.y=drecty[i];
+
+		if(ioctl(fd_g2d,G2D_CMD_STRETCHBLT,&str)<0)
+		{
+			printf("error stretchblt\n");
+			return -1;
+		}
+		usleep(2000);
+	}
+/*	tmp.flag               =G2D_BLT_FLIP_HORIZONTAL;
+	tmp.src_image.addr[0]  =potheraddr1;
+	tmp.src_image.w        =w*2;
+	tmp.src_image.h        =h*2;
+	tmp.src_image.format   =G2D_FMT_XRGB8888;
+	tmp.src_image.pixel_seq=G2D_SEQ_NORMAL;
+	tmp.src_rect.x         =0;
+	tmp.src_rect.y		   =0;
+	tmp.src_rect.w         =w*2;
+	tmp.src_rect.h         =h*2;
+    tmp.dst_image.addr[0]  =potherad;
+	tmp.dst_image.w        =w*2;
+	tmp.dst_image.h		   =h*2;
+	tmp.dst_image.format   =G2D_FMT_XRGB8888;
+	tmp.dst_image.pixel_seq=G2D_SEQ_NORMAL;
+	tmp.dst_x              =0; 
+	tmp.dst_y              =0;
+	tmp.color              =0;
+	tmp.alpha              =0;
+
+	if(ioctl(fd_g2d,G2D_CMD_BITBLT,&tmp)<0)
+	{
+		printf("error bitblt\n");
+		return -1;
+	}
+*/
+	return 0;
+}
+
+int disp_init()
+{
+
+//	int i;
+	//initialize the framebuff 0
+
+/*    fd_fb = open("/dev/fb0", O_RDWR);
+    struct fb_var_screeninfo vinfo;
+	struct fb_fix_screeninfo finfo;
+	if(ioctl(fd_fb,FBIOGET_FSCREENINFO,&finfo))
+	{
+		printf("Error reading fixed information\n");
+		return -1;
+	}
+	 
+	if(ioctl(fd_fb,FBIOGET_VSCREENINFO,&vinfo))
+	{
+		printf("Error reading variable information\n");
+		return -1;
+	}
+	printf("The physical address is :%lu\n",finfo.smem_start);
+	printf("The mem is :%d\n",finfo.smem_len);
+	printf("The line_length is :%d\n",finfo.line_length);
+	printf("The xres is :%d\n",vinfo.xres);
+	printf("The yres is :%d\n",vinfo.yres);
+	printf("bits_per_pixel is :%d\n",vinfo.bits_per_pixel);
+	paddr=finfo.smem_start;
+	addr=(unsigned char*)mmap(NULL,720*480*4,PROT_READ|PROT_WRITE,MAP_SHARED,fd_fb,0);
+	printf("fb addr:%p,fb paddr:%u\n",addr,(__u32)addr);
+
+*/
+	// open g2d which is used to color space conversion
+	
+    fd_g2d=open("/dev/g2d",O_RDWR);
+	if(fd_g2d<0)
+	{
+		printf("error open g2d\n");
+		return -1;
+	}
+
+	//alloc memory for the tmpbuf
+
+	tmpbuf=(unsigned char *)malloc(720*480*4);
+}
+
+//ctrl+c call back function
+//
+int handle_int()
+{
+	int j;
+	for(j=0;j<4;j++)
+	{
+		pthread_cancel(t[j]);
+	}
+	pthread_cancel(readbuf);
+	usleep(50000);
+	enum v4l2_buf_type type=V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	if(ioctl(fd_video,VIDIOC_STREAMOFF,&type)<0)
+	{
+		printf("error streamoff \n");
+		return -1;
+	}
+	printf("stream off\n");
+
+	for(j=0;j<BUF_NUM;j++)
+	{
+		if(munmap(buffers[j].start,buffers[j].length)<0)
+		{
+			printf("munmap error\n");
+			return -1;
+		}
+	}
+
+	free(buffers);
+	printf("free buffers\n");
+
+	free(tmpbuf);
+	printf("free tmpbuf\n");
+
+/*	if(munmap(addr,1440*960*4)<0)
+	{
+		printf("error munmap addr\n");
+		return -1;
+	}*/
+	if(munmap(otheraddr,1440*960*4)<0)
+	{
+		printf("error munmap otheraddr\n");
+		return -1;
+	}
+//	printf("free fb memory\n");
+//	close(fd_fb);
+//	printf("close fd_fb\n");
+	close(fd_video);
+	printf("close fd_video\n");
+	close(fd_g2d);
+	printf("close fd_g2d\n");
+	close(fd_mem);
+	printf("close fd_mem\n");
+	//free mali
+	glDeleteTextures(5,m_uiTexture);
+	glDeleteBuffers(1,&m_ui32Vbo);
+	glDeleteProgram(program);
+	glDeleteShader(vertex_shader);
+	glDeleteShader(fragment_shader);
+	eglMakeCurrent(egl_display,EGL_NO_SURFACE,EGL_NO_SURFACE,EGL_NO_CONTEXT);
+	eglTerminate(egl_display);
+
+	exit(0);
+}
+
+
+
+//static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_spinlock_t spinlock;
+void *readframe(void*)
+{
+	struct v4l2_buffer buff;
+	buff.memory =V4L2_MEMORY_MMAP;
+	buff.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	struct timeval start,end; 
+	while(1)
+	{
+     	fd_set fds;
+     	struct timeval tv;
+     	int r;
+     	FD_ZERO(&fds);
+     	FD_SET(fd_video,&fds);
+     	
+     	tv.tv_sec=2;
+     	tv.tv_usec=0;
+     	
+     	r=select(fd_video+1,&fds,NULL,NULL,&tv);
+     	if(r==-1)
+     	{
+     	    if(EINTR==errno)
+     	        continue;
+     	    printf("select err\n");
+     	}
+     	if(r==0)
+     	{
+     	    printf("error selet timeout\n");
+			pthread_exit(0);
+     	}
+		if(ioctl(fd_video,VIDIOC_DQBUF,&buff)<0)
+		{
+			printf("error dqbuffer\n");
+			pthread_exit(0);
+		}
+		if(buff.index==id)
+		{
+	//		pthread_mutex_lock(&mutex);
+			pthread_spin_lock(&spinlock);
+			flag=1;
+			gettimeofday(&start,NULL);
+			nv12toargb(1440,960,buff.m.offset,potheraddr);
+			gettimeofday(&end,NULL);
+			pthread_spin_unlock(&spinlock);
+			printf("stretching time:%ld\n",1000000*(end.tv_sec-start.tv_sec)+end.tv_usec-start.tv_usec);
+		}
+		if(ioctl(fd_video,VIDIOC_QBUF,&buff)<0)
+		{
+			printf("error qbuf\n");
+			pthread_exit(0);
+		}
+	}
+	pthread_exit(0);
+}
+/*
+void *thread(void *arg)
+{
+	struct para *ag=(struct para*)arg;
+	while(1)
+	{
+		sem_wait(&sem);
+		GetStitchImage_cs(front,rear,left,right,otheraddr,tmpbuf,ag->x,ag->y,TV_WIDTH,2,2);
+//		GetStitchImage7(frontcoordinatexMat, frontcoordinateyMat, frontweightMat, rearcoordinatexMat, rearcoordinateyMat, rearweightMat, leftcoordinatexMat,leftcoordinateyMat,leftweightMat, rightcoordinatexMat,rightcoordinateyMat, rightweightMat, otheraddr, tmpbuf, ag->x, ag->y, TV_WIDTH, 2, 2);
+		sem_post(&sem_fin);
+	}
+}
+*/
+
+int main(int argc, char* argv[])
+{
+	id=1;
+//	maliInit();   //initialize mali
+	//set the ctrl+c call back function
+    struct v4l2_format fmt_priv;
+	struct sigaction sigact;
+	int i=0;
+
+//	struct para args[4];
+//	args[0].x=0;
+//	args[0].y=0;
+//	args[1].x=STITCH_IMAGE_WIDTH/2;
+//	args[1].y=0;
+//	args[2].x=0;
+//	args[2].y=STITCH_IMAGE_HEIGHT/2;
+//	args[3].x=STITCH_IMAGE_WIDTH/2;
+//	args[3].y=STITCH_IMAGE_HEIGHT/2;
+
+//	sem_init(&sem,0,0);
+//	sem_init(&sem_fin,0,0);
+//	for(i=0;i<4;i++)
+//	{
+//		pthread_create(&t[i],NULL,thread,(void*)&args[i]);
+//	}
+	pthread_spin_init(&spinlock,0);
+	memset(&sigact,0,sizeof(sigact));
+	sigact.sa_handler=(__sighandler_t)handle_int;
+	sigaction(SIGINT,&sigact,NULL);
+
+	//get the virtual address of potheraddr
+	if((fd_mem=open("/dev/mem",O_RDWR))<0)
+	{
+		printf("error open mem\n");
+		return 0;
+	}
+	otheraddr=(unsigned char*)mmap(NULL,1440*960*4,PROT_READ|PROT_WRITE,MAP_SHARED,fd_mem,potheraddr);
+
+
+	// pixel format is V4L2_PIX_FMT_NV12
+	
+    printf("*********************\n");
+    printf("TVD demo start!\n");
+    printf("*********************\n");
+    fd_video = open ("/dev/video10", O_RDWR|O_NONBLOCK, 0);
+    memset(&fmt_priv,0,sizeof(fmt_priv));
+    fmt_priv.type                = V4L2_BUF_TYPE_PRIVATE;
+    fmt_priv.fmt.raw_data[0] =0;//interface
+    fmt_priv.fmt.raw_data[1] =0;//system
+    fmt_priv.fmt.raw_data[2] =0;//format 1=mb, for test only
+		
+    fmt_priv.fmt.raw_data[8] =2;//row
+    fmt_priv.fmt.raw_data[9] =2;//column
+	
+    fmt_priv.fmt.raw_data[10] =1;//channel_index
+    fmt_priv.fmt.raw_data[11] =2;//channel_index
+    fmt_priv.fmt.raw_data[12] =3;//channel_index
+    fmt_priv.fmt.raw_data[13] =4;//channel_index
+    if (-1 == ioctl (fd_video, VIDIOC_S_FMT, &fmt_priv)) 
+	{
+	    printf("VIDIOC_S_FMT error!  a\n");
+	    return -1; 
+	}
+    disp_size.width = fmt_priv.fmt.raw_data[8]*(fmt_priv.fmt.raw_data[2]?704:720);//width
+    disp_size.height = fmt_priv.fmt.raw_data[9]*(fmt_priv.fmt.raw_data[1]?576:480);//height
+    printf("disp_size.width=%d\n", disp_size.width);
+    printf("disp_size.height=%d\n", disp_size.height);
+    usleep(100000);//delay 100ms if you want to check the status after set fmt
+	
+    memset(&fmt_priv,0,sizeof(fmt_priv));
+    fmt_priv.type                = V4L2_BUF_TYPE_PRIVATE;
+    if (-1 == ioctl (fd_video, VIDIOC_G_FMT, &fmt_priv)) 
+	{
+	    printf("VIDIOC_G_FMT error!  a\n");
+	    return -1; 
+	}
+    printf("interface=%d\n", fmt_priv.fmt.raw_data[0]);
+    printf("system=%d\n", fmt_priv.fmt.raw_data[1]);
+    printf("format=%d\n", fmt_priv.fmt.raw_data[2]);
+    printf("row=%d\n", fmt_priv.fmt.raw_data[8]);
+    printf("column=%d\n", fmt_priv.fmt.raw_data[9]);
+    printf("channel_index[0]=%d\n", fmt_priv.fmt.raw_data[10]);
+    printf("channel_index[1]=%d\n", fmt_priv.fmt.raw_data[11]);
+    printf("channel_index[2]=%d\n", fmt_priv.fmt.raw_data[12]);
+    printf("channel_index[3]=%d\n", fmt_priv.fmt.raw_data[13]);
+    printf("status[0]=%d\n", fmt_priv.fmt.raw_data[16]);
+    printf("status[1]=%d\n", fmt_priv.fmt.raw_data[17]);
+    printf("status[2]=%d\n", fmt_priv.fmt.raw_data[18]);
+    printf("status[3]=%d\n", fmt_priv.fmt.raw_data[19]);
+  
+	InitStitchMap_cs(&front,&rear,&left,&right);
+	cfront=(unsigned char*)front;
+	crear=(unsigned char*)rear;
+	cleft=(unsigned char*)left;
+	cright=(unsigned char*)right;
+//	for(int i=0;i<480;i++)
+//	{
+//		for(int j=0;j<300;j++)
+//		{
+//			printf("%x ",*(crear+i*900*4+j));
+//		}
+//		printf("\n");
+//	}
+//	InitStitchMap4_s(&frontcoordinatexMat,&frontcoordinateyMat,&frontweightMat,&rearcoordinatexMat,&rearcoordinateyMat,&rearweightMat,&leftcoordinatexMat,&leftcoordinateyMat,&leftweightMat,&rightcoordinatexMat,&rightcoordinateyMat,&rightweightMat);
+
+	// requset the buffers
+    struct v4l2_requestbuffers req;
+    memset(&req,0,sizeof(req));
+    req.count=BUF_NUM;
+    req.type=V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    req.memory=V4L2_MEMORY_MMAP;
+    if(ioctl(fd_video,VIDIOC_REQBUFS,&req)<0)
+    {
+    	printf("error request buffers\n");
+    	return -1;
+    }
+    
+    buffers=(struct buffer*)calloc(req.count,sizeof(struct buffer));
+    
+    for(n_buffers=0;n_buffers<req.count;n_buffers++)
+    {
+    	struct v4l2_buffer buf;
+    	memset(&buf,0,sizeof(buf));
+    	buf.type=V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    	buf.memory=V4L2_MEMORY_MMAP;
+    	buf.index=n_buffers;
+    	if(ioctl(fd_video,VIDIOC_QUERYBUF,&buf))
+    	{
+    	    printf("error query buffers\n");
+    	    return -1;
+    	}
+		buffers[n_buffers].length =buf.length;
+		buffers[n_buffers].start=(char *)mmap(NULL,buf.length,PROT_READ|PROT_WRITE,MAP_SHARED,fd_video,buf.m.offset);
+		buffers[n_buffers].index=n_buffers;
+
+		printf("index %d:buf length:%u\n",buf.index,buf.length);
+		printf("MMAP: %p OFF: %u\n", buffers[n_buffers].start, buf.m.offset);
+		if(MAP_FAILED == buffers[n_buffers].start)
+		{
+			printf ("mmap failed\n");
+			return -1;
+		}	
+	
+	    if(ioctl (fd_video,VIDIOC_QBUF,&buf)<0)
+	    {
+			printf ("VIDIOC_QBUF failed\n");
+			return -1;
+	    }
+	}
+    disp_init();
+
+    enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	
+	if(ioctl(fd_video,VIDIOC_STREAMON,&type)<0) 
+	{
+	    printf ("VIDIOC_STREAMON failed\n");
+	    return -1;
+	}
+
+	pthread_create(&readbuf,NULL,readframe,NULL); //creat a thread to loop to read a frame
+	struct timeval start,end,start1,start2;
+	int j=0;
+
+	maliInit();   //initialize mali
+
+//	texturebuf = (char *)malloc(1440*960*4);
+/*	unsigned int *tintbuf = (unsigned int*)malloc(300*480*4);
+	for(int i=0;i<480;i++)
+		for(int j=0;j<300;j++)
+			*(tintbuf+i*300+j)=0x12345678;
+	unsigned char *tcharbuf=(unsigned char*)tintbuf;
+*/
+	unsigned char *readpixel= (unsigned char*)malloc(300*480*4);
+
+	while(1)  ///main thread deal with the image
+    {
+		gettimeofday(&start,NULL);
+		if(flag)
+		{
+		pthread_spin_lock(&spinlock);
+		gettimeofday(&start1,NULL);
+//		for(i=0;i<4;i++)      
+//			sem_post(&sem);    //wake up 4 threads
+//		for(i=0;i<4;i++)
+//			sem_wait(&sem_fin);
+		flag=0;
+//		for(int i=0;i<480;i++)
+//			memcpy(texturebuf+i*300*4,tmpbuf+i*720*4,300*4);
+/*		for(int i=0;i<5;i++)
+		{
+			for(int j=0;j<10;j++)
+				printf("%d ",*(tmpbuf+i*720*4+j));
+			printf("tmpbuf\n");
+			for(int j=0;j<10;j++)
+				printf("%d ",*(texturebuf+i*300*4+j));
+			printf("texture\n");
+		}*/
+
+	//	memcpy(texturebuf,otheraddr,1440*960*4);
+//		pthread_mutex_unlock(&mutex);
+		
+		glClear(GL_COLOR_BUFFER_BIT);
+	//	glActiveTexture(GL_TEXTURE0);
+		glTexSubImage2D(GL_TEXTURE_2D,0,0,0,1440,960,GL_RGBA,GL_UNSIGNED_BYTE,otheraddr);
+		glFlush();
+	//	glDrawArrays(GL_TRIANGLE_STRIP,0,4);
+	//	eglSwapBuffers(egl_display,egl_surface);
+		gettimeofday(&end,NULL);
+		printf("texsubimage:%ld\n",1000000*(end.tv_sec-start1.tv_sec)+end.tv_usec-start1.tv_usec);
+		pthread_spin_unlock(&spinlock);
+	//	for(int i=0;i<5;i++)
+	//	{
+	//		for(int j=0;j<10;j++)
+	//			printf("%x ",*(tcharbuf+i*300*4+j));
+	//		printf("tintbuf\n");
+	//	}
+	//	glTexSubImage2D(GL_TEXTURE_2D,0,0,0,300,480,GL_RGBA,GL_UNSIGNED_BYTE,tcharbuf);
+//		glFlush();
+		gettimeofday(&start2,NULL);
+		glDrawArrays(GL_TRIANGLE_STRIP,0,4);
+		eglSwapBuffers(egl_display,egl_surface);
+		gettimeofday(&end,NULL);
+		printf("drawing:%ld\n",1000000*(end.tv_sec-start2.tv_sec)+end.tv_usec-start2.tv_usec);
+		printf("displaying:%ld\n",1000000*(end.tv_sec-start.tv_sec)+end.tv_usec-start.tv_usec);
+		}
+	}
+}
+
+// init the mali
+//
+int maliInit(void)
+{
+	native_window.width=WIDTH;
+	native_window.height=HEIGHT;
+
+	egl_display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+
+	if (egl_display == EGL_NO_DISPLAY) 
+	{
+		fprintf(stderr, "Error: No display found!\n");
+		return -1;
+	}
+
+	if (!eglInitialize(egl_display, &egl_major, &egl_minor)) 
+	{
+		fprintf(stderr, "Error: eglInitialise failed!\n");
+		return -1;
+	}
+
+	printf("EGL Version: \"%s\"\n",
+		eglQueryString(egl_display, EGL_VERSION));
+	printf("EGL Vendor: \"%s\"\n",
+		eglQueryString(egl_display, EGL_VENDOR));
+	printf("EGL Extensions: \"%s\"\n",
+		eglQueryString(egl_display, EGL_EXTENSIONS));
+
+	eglChooseConfig(egl_display, config_attribute_list, &config, 1,
+			            &num_config);
+	context = eglCreateContext(egl_display, config, EGL_NO_CONTEXT,
+			                   context_attribute_list);
+	if (context == EGL_NO_CONTEXT) 
+	{
+		fprintf(stderr, "Error: eglCreateContext failed: 0x%08X\n",
+						eglGetError());
+		return -1;
+	}
+
+	egl_surface = eglCreateWindowSurface(egl_display, config,
+									&native_window,
+								    window_attribute_list);
+	if (egl_surface == EGL_NO_SURFACE) 
+	{
+		fprintf(stderr, "Error: eglCreateWindowSurface failed: "
+					"0x%08X\n", eglGetError());
+		return -1;
+	}
+
+	if (!eglQuerySurface(egl_display, egl_surface, EGL_WIDTH, &ewidth) ||
+		!eglQuerySurface(egl_display, egl_surface, EGL_HEIGHT, &eheight)) 
+	{
+		fprintf(stderr, "Error: eglQuerySurface failed: 0x%08X\n",
+				eglGetError());
+		return -1;
+	}
+
+	printf("Surface size: %dx%d\n", ewidth, eheight);
+	if (!eglMakeCurrent(egl_display, egl_surface, egl_surface, context))
+	{
+		fprintf(stderr, "Error: eglMakeCurrent() failed: 0x%08X\n",
+						eglGetError());
+		return -1;
+	}
+
+	printf("GL Vendor: \"%s\"\n", glGetString(GL_VENDOR));
+	printf("GL Renderer: \"%s\"\n", glGetString(GL_RENDERER));
+	printf("GL Version: \"%s\"\n", glGetString(GL_VERSION));
+	printf("GL Extensions: \"%s\"\n", glGetString(GL_EXTENSIONS));
+	
+	vertex_shader = glCreateShader(GL_VERTEX_SHADER);
+	if (!vertex_shader) 
+	{
+		fprintf(stderr, "Error: glCreateShader(GL_VERTEX_SHADER) "
+					"failed: 0x%08X\n", glGetError());
+		return -1;
+	}
+
+	glShaderSource(vertex_shader, 1, &vertex_shader_source, NULL);
+	glCompileShader(vertex_shader);
+
+	glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &ret);
+	if (!ret) 
+	{
+		char *log;
+		fprintf(stderr, "Error: vertex shader compilation failed!\n");
+		glGetShaderiv(vertex_shader, GL_INFO_LOG_LENGTH, &ret);
+		if (ret > 1) 
+		{
+			log =(char*)malloc(ret);
+			glGetShaderInfoLog(vertex_shader, ret, NULL, log);								fprintf(stderr, "%s", log);
+		}
+		return -1;
+	}
+
+	fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
+	if (!fragment_shader) 
+	{
+		fprintf(stderr, "Error: glCreateShader(GL_FRAGMENT_SHADER) "
+			"failed: 0x%08X\n", glGetError());
+		return -1;
+	}
+	glShaderSource(fragment_shader, 1, &fragment_shader_source, NULL);
+	glCompileShader(fragment_shader);
+
+	glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &ret);
+	if (!ret) 
+	{
+		char *log;
+		fprintf(stderr, "Error: fragment shader compilation failed!\n");
+		glGetShaderiv(fragment_shader, GL_INFO_LOG_LENGTH, &ret);
+		if (ret > 1)
+		{
+			log = (char*)malloc(ret);
+			glGetShaderInfoLog(fragment_shader, ret, NULL, log);							fprintf(stderr, "%s", log);													}
+		return -1;
+	}
+
+	program = glCreateProgram();
+	if (!program)
+	{
+		fprintf(stderr, "Error: failed to create program!\n");
+		return -1;
+	}
+
+	glAttachShader(program, vertex_shader);
+    glAttachShader(program, fragment_shader);
+	glBindAttribLocation(program, 0, "myVertex");
+	glBindAttribLocation(program, 1, "myUV");
+	glLinkProgram(program);
+	glGetProgramiv(program, GL_LINK_STATUS, &ret);
+	if (!ret) 
+	{
+		char *log;
+		fprintf(stderr, "Error: program linking failed!\n");
+		glGetProgramiv(program, GL_INFO_LOG_LENGTH, &ret);
+		if (ret > 1) 
+		{
+			log =(char*)malloc(ret);
+			glGetProgramInfoLog(program, ret, NULL, log);									fprintf(stderr, "%s", log);												    }
+		return -1;
+	}
+	glUseProgram(program);
+
+//	glEnable(GL_TEXTURE_2D);
+//	glEnable(GL_BLEND);
+//	glBlendFunc(GL_ONE,GL_ZERO);
+
+	glClearColor(0.2, 0.2, 0.2, 1.0);
+
+//	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, vVertices);
+//	glEnableVertexAttribArray(0);
+
+//	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 0, vTextureCoords);
+//	glEnableVertexAttribArray(1);
+
+	glUniform1i(glGetUniformLocation(program,"sampler2d_image"),0);
+	glUniform1i(glGetUniformLocation(program,"sampler2d_front"),1);
+	glUniform1i(glGetUniformLocation(program,"sampler2d_rear"),2);
+	glUniform1i(glGetUniformLocation(program,"sampler2d_left"),3);
+	glUniform1i(glGetUniformLocation(program,"sampler2d_right"),4);
+	glGenTextures(5,m_uiTexture);
+
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D,m_uiTexture[0]);
+	glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,1440,960,0,GL_RGBA,
+				GL_UNSIGNED_BYTE,NULL);
+//	glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,1024,1024,0,GL_RGBA,
+//				GL_UNSIGNED_BYTE,NULL);
+	glTexParameterf(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+	glTexParameterf(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_2D,m_uiTexture[1]);
+	glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,900,480,0,GL_RGBA,
+				GL_UNSIGNED_BYTE,NULL);
+	glTexParameterf(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+	glTexParameterf(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+	glTexSubImage2D(GL_TEXTURE_2D,0,0,0,900,480,GL_RGBA,GL_UNSIGNED_BYTE,cfront);
+
+	glActiveTexture(GL_TEXTURE2);
+	glBindTexture(GL_TEXTURE_2D,m_uiTexture[2]);
+	glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,900,480,0,GL_RGBA,
+				GL_UNSIGNED_BYTE,NULL);
+	glTexParameterf(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+	glTexParameterf(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+	glTexSubImage2D(GL_TEXTURE_2D,0,0,0,900,480,GL_RGBA,GL_UNSIGNED_BYTE,crear);
+
+	glActiveTexture(GL_TEXTURE3);
+	glBindTexture(GL_TEXTURE_2D,m_uiTexture[3]);
+	glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,900,480,0,GL_RGBA,
+				GL_UNSIGNED_BYTE,NULL);
+	glTexParameterf(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+	glTexParameterf(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+	glTexSubImage2D(GL_TEXTURE_2D,0,0,0,900,480,GL_RGBA,GL_UNSIGNED_BYTE,cleft);
+
+	glActiveTexture(GL_TEXTURE4);
+	glBindTexture(GL_TEXTURE_2D,m_uiTexture[4]);
+	glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,900,480,0,GL_RGBA,
+				GL_UNSIGNED_BYTE,NULL);
+	glTexParameterf(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+	glTexParameterf(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+	glTexSubImage2D(GL_TEXTURE_2D,0,0,0,900,480,GL_RGBA,GL_UNSIGNED_BYTE,cright);
+
+	glViewport(0,0,ewidth,eheight);
+
+	GLfloat afVertices[] = {-1.0f,1.0f,0.0f,
+							0.0f,1.0f,
+							1.0f,1.0f,0.0f,
+							1.0f,1.0f,
+							-1.0f,-1.0f,0.0f,
+							0.0f,0.0f,
+							1.0f,-1.0f,0.0f,
+							1.0f,0.0f
+							};
+
+	glGenBuffers(1,&m_ui32Vbo);
+	m_ui32VertexStride = 5*sizeof(GLfloat);
+	glBindBuffer(GL_ARRAY_BUFFER,m_ui32Vbo);
+	glBufferData(GL_ARRAY_BUFFER,4*m_ui32VertexStride,afVertices,GL_STATIC_DRAW);
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, m_ui32VertexStride, 0);
+
+	glEnableVertexAttribArray(1);
+	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, m_ui32VertexStride,(void*)(3*sizeof(GLfloat)));
+	glActiveTexture(GL_TEXTURE0);
+	return 0;
+}
+

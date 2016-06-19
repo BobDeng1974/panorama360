@@ -1,0 +1,287 @@
+#ifndef _API_H
+#define _API_H
+
+#include "../bottom/bottom.h"
+
+#define SCALE			(10.)				//缩放比例
+#define ACCURACY_BIT		1				//计算精度位数
+#define ACCURACY_NUM		2			//计算精度大小
+#define ACCURACY_POINT		0x00000001		//计算精度小数部分
+
+
+//拼接所用到的信息
+typedef struct{
+	IplImage		*srcImage;				//畸变的源图像
+	IplImage		*undistorImage;			//校正后的透视图
+	IplImage		*birdImage;				//俯视图
+	IplImage		*transformImage;		//单方向映射到全景图
+	IplImage		*stitchImage;			//全景图
+
+	IplImage		*mapx;					//畸变校正X坐标表
+	IplImage		*mapy;					//畸变校正Y坐标表
+
+	CvPoint2D32f	*srcCorners;			//源图像棋盘格坐标
+	CvPoint2D32f	*birdCorners;			//俯视图中棋盘格坐标
+
+	CvPoint2D32f	*srcMarkPoint;			//标记点相对棋盘格的坐标
+	CvPoint2D32f	*birdMarkPoint;			//俯视图中标记点坐标
+	CvPoint2D32f	*stitchMarkPoint;		//全景图中标记点坐标
+
+	CvPoint2D32f	*stitchPoint;			//全景图中各方向所属部分的顶点
+
+	int				nboard_w;				//棋盘水平方向格子数
+	int				nboard_h;				//棋盘垂直方向格子数
+	float			fboardwidth;			//棋盘水平方向格子实际长度
+	float			fboardheight;			//棋盘水平方向格子实际长度
+
+	CvMat			*birdMat;				//透视图到俯视图的映射矩阵
+	CvMat			*stitchMat;				//俯视图到拼接图的映射矩阵
+}StitchInfo, *pStitchInfo;
+
+/************************************************************************/
+/*				初始化拼接参数                                          */
+/************************************************************************/
+bool InitParam(StitchInfo *front, StitchInfo *rear, StitchInfo *left, StitchInfo *right);
+/************************************************************************/
+/*				获取俯视图                                              */
+/************************************************************************/
+bool GetBirdImage(StitchInfo *stInfo);
+/************************************************************************/
+/*				计算标记点                                              */
+/************************************************************************/
+bool GetMarkPoint(StitchInfo *front, StitchInfo *rear, StitchInfo *left, StitchInfo *right);
+/************************************************************************/
+/*              拼接                                                     */
+/************************************************************************/
+bool StitchImage(StitchInfo *front, StitchInfo *rear, StitchInfo *left, StitchInfo *right);
+/************************************************************************/
+/*				释放拼接参数内存		                                */
+/************************************************************************/
+bool ReleaseParam(StitchInfo *front, StitchInfo *rear, StitchInfo *left, StitchInfo *right);
+/************************************************************************/
+/*				输出全景表                                              */
+/************************************************************************/
+bool WriteStitchMap(StitchInfo *front, StitchInfo *rear, StitchInfo *left, StitchInfo *right);
+/************************************************************************/
+/*				初始化拼接表                                            */
+/*              根据全景表生成全景图                                    */
+/*				float *frontcoordinatexMat: 前向X坐标表					*/
+/*				float *frontcoordinateyMat: 前向Y坐标表					*/
+/*				float *frontweightMat:		前向权值表					*/
+/*				float *rearcoordinatexMat:	后向X坐标表					*/
+/*				float *rearcoordinateyMat:	后向Y坐标表					*/
+/*				float *rearweightMat:		后向权值表					*/
+/*				float *leftcoordinatexMat:	左向X坐标表					*/
+/*				float *leftcoordinateyMat:	左向Y坐标表					*/
+/*				float *leftweightMat:		左向权值表					*/
+/*				float *rightcoordinatexMat: 右向X坐标表					*/
+/*				float *rightcoordinateyMat: 右向Y坐标表					*/
+/************************************************************************/
+bool InitStitchMap(float **frontcoordinatexMat, float **frontcoordinateyMat, float **frontweightMat, float **rearcoordinatexMat, float **rearcoordinateyMat,
+	float **rearweightMat, float **leftcoordinatexMat, float **leftcoordinateyMat, float **leftweightMat, float **rightcoordinatexMat, float **rightcoordinateyMat, 
+	float **rightweightMat);
+/************************************************************************/
+/*				单线程调用												*/
+/*              根据全景表生成全景图                                    */
+/*				float *frontcoordinatexMat: 前向X坐标表					*/
+/*				float *frontcoordinateyMat: 前向Y坐标表					*/
+/*				float *frontweightMat:		前向权值表					*/
+/*				float *rearcoordinatexMat:	后向X坐标表					*/
+/*				float *rearcoordinateyMat:	后向Y坐标表					*/
+/*				float *rearweightMat:		后向权值表					*/
+/*				float *leftcoordinatexMat:	左向X坐标表					*/
+/*				float *leftcoordinateyMat:	左向Y坐标表					*/
+/*				float *leftweightMat:		左向权值表					*/
+/*				float *rightcoordinatexMat: 右向X坐标表					*/
+/*				float *rightcoordinateyMat: 右向Y坐标表					*/
+/*				float *rightweightMat:		右向权值表					*/
+/*				unsigned char *frontImage	前向源图像内存地址			*/
+/*				unsigned char *rearImage	后向源图像内存地址			*/
+/*				unsigned char *leftImage	左向源图像内存地址			*/
+/*				unsigned char *rightImage	右向源图像内存地址			*/
+/*				unsigned char *stitchImage	输出全景图像内存地址		*/
+/************************************************************************/
+bool GetStitchImage(float *frontcoordinatexMat, float *frontcoordinateyMat, float *frontweightMat, float *rearcoordinatexMat, float *rearcoordinateyMat,
+	float *rearweightMat, float *leftcoordinatexMat, float *leftcoordinateyMat, float *leftweightMat, float *rightcoordinatexMat, float *rightcoordinateyMat, 
+	float *rightweightMat, unsigned char *frontImage,  unsigned char *rearImage,  unsigned char *leftImage,  unsigned char *rightImage,  
+	unsigned char *stitchImage);
+/************************************************************************/
+/*				释放拼接表		                                        */
+/*				unsigned int *frontcoordinatexMat: 前向X坐标表			*/
+/*				unsigned int *frontcoordinateyMat: 前向Y坐标表			*/
+/*				unsigned int *frontweightMat:		前向权值表			*/
+/*				unsigned int *rearcoordinatexMat:	后向X坐标表			*/
+/*				unsigned int *rearcoordinateyMat:	后向Y坐标表			*/
+/*				unsigned int *rearweightMat:		后向权值表			*/
+/*				unsigned int *leftcoordinatexMat:	左向X坐标表			*/
+/*				unsigned int *leftcoordinateyMat:	左向Y坐标表			*/
+/*				unsigned int *leftweightMat:		左向权值表			*/
+/*				unsigned int *rightcoordinatexMat: 右向X坐标表			*/
+/*				unsigned int *rightcoordinateyMat: 右向Y坐标表			*/
+/*				unsigned int *rightweightMat:		右向权值表			*/
+/************************************************************************/
+bool ReleaseStitchMap(unsigned int **frontcoordinatexMat, unsigned int **frontcoordinateyMat, unsigned int **frontweightMat, unsigned int **rearcoordinatexMat, 
+	unsigned int **rearcoordinateyMat, unsigned int **rearweightMat, unsigned int **leftcoordinatexMat, unsigned int **leftcoordinateyMat, 
+	unsigned int **leftweightMat, unsigned int **rightcoordinatexMat, unsigned int **rightcoordinateyMat, unsigned int **rightweightMat);
+/************************************************************************/
+/*				多线程调用												*/
+/*              根据全景表生成全景图                                    */
+/*				float *frontcoordinatexMat: 前向X坐标表					*/
+/*				float *frontcoordinateyMat: 前向Y坐标表					*/
+/*				float *frontweightMat:		前向权值表					*/
+/*				float *rearcoordinatexMat:	后向X坐标表					*/
+/*				float *rearcoordinateyMat:	后向Y坐标表					*/
+/*				float *rearweightMat:		后向权值表					*/
+/*				float *leftcoordinatexMat:	左向X坐标表					*/
+/*				float *leftcoordinateyMat:	左向Y坐标表					*/
+/*				float *leftweightMat:		左向权值表					*/
+/*				float *rightcoordinatexMat: 右向X坐标表					*/
+/*				float *rightcoordinateyMat: 右向Y坐标表					*/
+/*				float *rightweightMat:		右向权值表					*/
+/*				unsigned char *frontImage	前向源图像内存地址			*/
+/*				unsigned char *rearImage	后向源图像内存地址			*/
+/*				unsigned char *leftImage	左向源图像内存地址			*/
+/*				unsigned char *rightImage	右向源图像内存地址			*/
+/*				unsigned char *stitchImage	输出全景图像内存地址		*/
+/*				int xoffset:				x坐标偏移量					*/
+/*				int yoffset:				y坐标偏移量					*/
+/*				int dstwidthstep:			显示到显示屏的宽			*/
+/*				int NX:						水平方向被分成NX部分		*/
+/*				int NY:						垂直方向被分成NY部分		*/
+/************************************************************************/
+bool GetStitchImage2(float *frontcoordinatexMat, float *frontcoordinateyMat, float *frontweightMat, float *rearcoordinatexMat, float *rearcoordinateyMat,
+	float *rearweightMat, float *leftcoordinatexMat, float *leftcoordinateyMat, float *leftweightMat, float *rightcoordinatexMat, float *rightcoordinateyMat, 
+	float *rightweightMat, unsigned char *frontImage,  unsigned char *rearImage,  unsigned char *leftImage,  unsigned char *rightImage,  
+	unsigned char *stitchImage, int xoffset, int yoffset, int dstwidthstep, int NX, int NY);
+/************************************************************************/
+/*				多线程调用(定点运算)									*/
+/*              根据全景表生成全景图                                    */
+/*				unsigned int *frontcoordinatexMat: 前向X坐标表			*/
+/*				unsigned int *frontcoordinateyMat: 前向Y坐标表			*/
+/*				unsigned int *frontweightMat:		前向权值表			*/
+/*				unsigned int *rearcoordinatexMat:	后向X坐标表			*/
+/*				unsigned int *rearcoordinateyMat:	后向Y坐标表			*/
+/*				unsigned int *rearweightMat:		后向权值表			*/
+/*				unsigned int *leftcoordinatexMat:	左向X坐标表			*/
+/*				unsigned int *leftcoordinateyMat:	左向Y坐标表			*/
+/*				unsigned int *leftweightMat:		左向权值表			*/
+/*				unsigned int *rightcoordinatexMat: 右向X坐标表			*/
+/*				unsigned int *rightcoordinateyMat: 右向Y坐标表			*/
+/*				unsigned char *frontImage	前向源图像内存地址			*/
+/*				unsigned char *rearImage	后向源图像内存地址			*/
+/*				unsigned char *leftImage	左向源图像内存地址			*/
+/*				unsigned char *rightImage	右向源图像内存地址			*/
+/*				unsigned char *stitchImage	输出全景图像内存地址		*/
+/*				int xoffset:				x坐标偏移量					*/
+/*				int yoffset:				y坐标偏移量					*/
+/*				int dstwidthstep:			显示到显示屏的宽			*/
+/*				int NX:						水平方向被分成NX部分		*/
+/*				int NY:						垂直方向被分成NY部分		*/
+/************************************************************************/
+bool GetStitchImage3(unsigned int *frontcoordinatexMat, unsigned int *frontcoordinateyMat, unsigned int *frontweightMat, unsigned int *rearcoordinatexMat, 
+	unsigned int *rearcoordinateyMat, unsigned int *rearweightMat, unsigned int *leftcoordinatexMat, unsigned int *leftcoordinateyMat, unsigned int *leftweightMat, 
+	unsigned int *rightcoordinatexMat, unsigned int *rightcoordinateyMat, unsigned int *rightweightMat, unsigned char *frontImage,  unsigned char *rearImage,  
+	unsigned char *leftImage,  unsigned char *rightImage,  	unsigned char *stitchImage, int xoffset, int yoffset, int dstwidthstep, int NX, int NY);
+/************************************************************************/
+/*				初始化拼接表(定点运算）                                 */
+/*              根据全景表生成全景图                                    */
+/*				unsigned int *frontcoordinatexMat: 前向X坐标表			*/
+/*				unsigned int *frontcoordinateyMat: 前向Y坐标表			*/
+/*				unsigned int *frontweightMat:		前向权值表			*/
+/*				unsigned int *rearcoordinatexMat:	后向X坐标表			*/
+/*				unsigned int *rearcoordinateyMat:	后向Y坐标表			*/
+/*				unsigned int *rearweightMat:		后向权值表			*/
+/*				unsigned int *leftcoordinatexMat:	左向X坐标表			*/
+/*				unsigned int *leftcoordinateyMat:	左向Y坐标表			*/
+/*				unsigned int *leftweightMat:		左向权值表			*/
+/*				unsigned int *rightcoordinatexMat: 右向X坐标表			*/
+/*				unsigned int *rightcoordinateyMat: 右向Y坐标表			*/
+/************************************************************************/
+bool InitStitchMap2(unsigned int **frontcoordinatex, unsigned int **frontcoordinatey, unsigned int **frontweight, unsigned int **rearcoordinatex, 
+	unsigned int **rearcoordinatey, unsigned int **rearweight, unsigned int **leftcoordinatex, unsigned int **leftcoordinatey, unsigned int **leftweight, 
+	unsigned int **rightcoordinatex, unsigned int **rightcoordinatey, unsigned int **rightweight);
+
+bool GetStitchImage4(unsigned int *frontcoordinatexMat, unsigned int *frontcoordinateyMat, unsigned int *frontweightMat, unsigned int *rearcoordinatexMat, 
+	unsigned int *rearcoordinateyMat, unsigned int *rearweightMat, unsigned int *leftcoordinatexMat, unsigned int *leftcoordinateyMat, unsigned int *leftweightMat, 
+	unsigned int *rightcoordinatexMat, unsigned int *rightcoordinateyMat, unsigned int *rightweightMat, unsigned char *frontImage,  unsigned char *rearImage,  
+	unsigned char *leftImage,  unsigned char *rightImage,  	unsigned char *stitchImage, int yoffset, int length, int dstwidthstep);
+
+/************************************************************************/
+/*				多线程调用(定点运算、不做插值)									*/
+/*              根据全景表生成全景图                                    */
+/*				unsigned int *frontcoordinatexMat: 前向X坐标表			*/
+/*				unsigned int *frontcoordinateyMat: 前向Y坐标表			*/
+/*				unsigned int *frontweightMat:		前向权值表			*/
+/*				unsigned int *rearcoordinatexMat:	后向X坐标表			*/
+/*				unsigned int *rearcoordinateyMat:	后向Y坐标表			*/
+/*				unsigned int *rearweightMat:		后向权值表			*/
+/*				unsigned int *leftcoordinatexMat:	左向X坐标表			*/
+/*				unsigned int *leftcoordinateyMat:	左向Y坐标表			*/
+/*				unsigned int *leftweightMat:		左向权值表			*/
+/*				unsigned int *rightcoordinatexMat: 右向X坐标表			*/
+/*				unsigned int *rightcoordinateyMat: 右向Y坐标表			*/
+/*				unsigned char *frontImage	前向源图像内存地址			*/
+/*				unsigned char *rearImage	后向源图像内存地址			*/
+/*				unsigned char *leftImage	左向源图像内存地址			*/
+/*				unsigned char *rightImage	右向源图像内存地址			*/
+/*				unsigned char *stitchImage	输出全景图像内存地址		*/
+/*				int xoffset:				x坐标偏移量					*/
+/*				int yoffset:				y坐标偏移量					*/
+/*				int dstwidthstep:			显示到显示屏的宽			*/
+/*				int NX:						水平方向被分成NX部分		*/
+/*				int NY:						垂直方向被分成NY部分		*/
+/************************************************************************/
+bool GetStitchImage5(unsigned int *frontcoordinatexMat, unsigned int *frontcoordinateyMat, unsigned int *frontweightMat, unsigned int *rearcoordinatexMat, 
+	unsigned int *rearcoordinateyMat, unsigned int *rearweightMat, unsigned int *leftcoordinatexMat, unsigned int *leftcoordinateyMat, unsigned int *leftweightMat, 
+	unsigned int *rightcoordinatexMat, unsigned int *rightcoordinateyMat, unsigned int *rightweightMat, unsigned char *frontImage,  unsigned char *rearImage,  
+	unsigned char *leftImage,  unsigned char *rightImage,  	unsigned char *stitchImage, int xoffset, int yoffset, int dstwidthstep, int NX, int NY);
+/************************************************************************/
+/*				初始化拼接表(定点运算、不做插值、单幅源图像做处理）     */
+/*              根据全景表生成全景图                                    */
+/*				unsigned int *frontcoordinatexMat: 前向X坐标表			*/
+/*				unsigned int *frontcoordinateyMat: 前向Y坐标表			*/
+/*				unsigned int *frontweightMat:		前向权值表			*/
+/*				unsigned int *rearcoordinatexMat:	后向X坐标表			*/
+/*				unsigned int *rearcoordinateyMat:	后向Y坐标表			*/
+/*				unsigned int *rearweightMat:		后向权值表			*/
+/*				unsigned int *leftcoordinatexMat:	左向X坐标表			*/
+/*				unsigned int *leftcoordinateyMat:	左向Y坐标表			*/
+/*				unsigned int *leftweightMat:		左向权值表			*/
+/*				unsigned int *rightcoordinatexMat: 右向X坐标表			*/
+/*				unsigned int *rightcoordinateyMat: 右向Y坐标表			*/
+/************************************************************************/
+bool InitStitchMap3(unsigned int **frontcoordinatex, unsigned int **frontcoordinatey, unsigned int **frontweight, unsigned int **rearcoordinatex, 
+	unsigned int **rearcoordinatey, unsigned int **rearweight, unsigned int **leftcoordinatex, unsigned int **leftcoordinatey, unsigned int **leftweight, 
+	unsigned int **rightcoordinatex, unsigned int **rightcoordinatey, unsigned int **rightweight);
+/************************************************************************/
+/*				多线程调用(定点运算、不做插值、单幅源图像做处理)		*/
+/*              根据全景表生成全景图                                    */
+/*				unsigned int *frontcoordinatexMat: 前向X坐标表			*/
+/*				unsigned int *frontcoordinateyMat: 前向Y坐标表			*/
+/*				unsigned int *frontweightMat:		前向权值表			*/
+/*				unsigned int *rearcoordinatexMat:	后向X坐标表			*/
+/*				unsigned int *rearcoordinateyMat:	后向Y坐标表			*/
+/*				unsigned int *rearweightMat:		后向权值表			*/
+/*				unsigned int *leftcoordinatexMat:	左向X坐标表			*/
+/*				unsigned int *leftcoordinateyMat:	左向Y坐标表			*/
+/*				unsigned int *leftweightMat:		左向权值表			*/
+/*				unsigned int *rightcoordinatexMat: 右向X坐标表			*/
+/*				unsigned int *rightcoordinateyMat: 右向Y坐标表			*/
+/*				unsigned char *frontImage	前向源图像内存地址			*/
+/*				unsigned char *rearImage	后向源图像内存地址			*/
+/*				unsigned char *leftImage	左向源图像内存地址			*/
+/*				unsigned char *rightImage	右向源图像内存地址			*/
+/*				unsigned char *stitchImage	输出全景图像内存地址		*/
+/*				int xoffset:				x坐标偏移量					*/
+/*				int yoffset:				y坐标偏移量					*/
+/*				int dstwidthstep:			显示到显示屏的宽			*/
+/*				int NX:						水平方向被分成NX部分		*/
+/*				int NY:						垂直方向被分成NY部分		*/
+/************************************************************************/
+bool GetStitchImage6(unsigned int *frontcoordinatexMat, unsigned int *frontcoordinateyMat, unsigned int *frontweightMat, unsigned int *rearcoordinatexMat, 
+	unsigned int *rearcoordinateyMat, unsigned int *rearweightMat, unsigned int *leftcoordinatexMat, unsigned int *leftcoordinateyMat, unsigned int *leftweightMat, 
+	unsigned int *rightcoordinatexMat, unsigned int *rightcoordinateyMat, unsigned int *rightweightMat, unsigned char *srcImage, unsigned char *stitchImage, 
+	int xoffset, int yoffset, int dstwidthstep, int NX, int NY);
+
+
+#endif
