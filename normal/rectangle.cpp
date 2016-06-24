@@ -27,6 +27,8 @@ Rectangle::Rectangle(unsigned char *cfront,unsigned char *crear,unsigned char *c
 
 	LOGD("Rectangle initialization started..\n");
 
+	// load vertex shader and fragment shader
+
 	string vertexShader = resourceDirectory+vertexShaderFilename;
 	Shader::processShader(&vertexShaderID,vertexShader.c_str(),GL_VERTEX_SHADER);
 	string fragmentShader = resourceDirectory+fragmentShaderFilename;
@@ -117,6 +119,7 @@ void Rectangle::draw(unsigned char *otheraddr)
 	GL_CHECK(glUseProgram(programID));
 	GL_CHECK(glActiveTexture(GL_TEXTURE0));
 	GL_CHECK(glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT));
+	// refresh the texture with original image
 	GL_CHECK(glTexSubImage2D(GL_TEXTURE_2D,0,0,0,1440,960,GL_RGBA,GL_UNSIGNED_BYTE,otheraddr));
 	GL_CHECK(glEnableVertexAttribArray(m_iLocPosition));
 	GL_CHECK(glVertexAttribPointer(m_iLocPosition,3,GL_FLOAT,GL_FALSE,0,afVertices));

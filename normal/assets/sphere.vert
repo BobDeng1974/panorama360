@@ -15,5 +15,5 @@ varying vec2 myTexCoord;
 void main()
 {
 	myTexCoord = myUV;
-    gl_Position = mvp * av4position;
+    gl_Position = mvp * av4position; 
 }

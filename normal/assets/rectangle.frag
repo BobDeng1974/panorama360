@@ -29,8 +29,11 @@ void main(void)
 	{
 	
 	//	gl_FragColor = texture2D(sampler2d_car,vec2((gl_FragCoord.x-110.0)/100.0,(gl_FragCoord.y-190.0)/110.0));
-		
-		gl_FragColor = texture2D(sampler2d_car,vec2(1.0-(gl_FragCoord.y-190.0)/110.0,1.0-(gl_FragCoord.x-110.0)/100.0));
+	
+	//rotate 90 degree clockwise
+	
+		gl_FragColor = texture2D(sampler2d_car,vec2(1.0-(gl_FragCoord.y-190.0)/110.0,(gl_FragCoord.x-110.0)/100.0));
+	
 	}
 
 	// generate panorama
@@ -38,7 +41,11 @@ void main(void)
 	else if(gl_FragCoord.x<=300.0)
 	{
 
-	// restore an ineger in cpu from four bytes 
+	// restore an integer in CPU from four bytes in GPU
+	// Integer = b1 + b2 * 256.0 + b3 * 65536 + b4 * 16777216
+	//   0<=weight<=256  ,  0<=x<=720*1024  ,  0<=y<=480*1024
+	// so weight can be restore by two bytes, coordinates can be restore by three bytes
+	// and the integer will be normalized in GPU
 
 	frontwvec=texture2D(sampler2d_front,vec2((gl_FragCoord.x+300.0*2.0)/900.0,(480.0-gl_FragCoord.y)/480.0));										  
 	rearwvec=texture2D(sampler2d_rear,vec2((gl_FragCoord.x+300.0*2.0)/900.0,(480.0-gl_FragCoord.y)/480.0));											  
@@ -54,7 +61,7 @@ void main(void)
 		frontval=vec4(0.0,0.0,0.0,0.0);					  
 	else												  
 	{	
-		// the x and y coordinate has been mutiplied by 1024 before
+		// restore coordinates but the x and y coordinate has been mutiplied by 1024 before
 
 		tmpfrontxvec=texture2D(sampler2d_front,vec2(gl_FragCoord.x/900.0,(480.0-gl_FragCoord.y)/480.0));										  
 		tmpfrontyvec=texture2D(sampler2d_front,vec2((gl_FragCoord.x+300.0)/900.0,(480.0-gl_FragCoord.y)/480.0));								  
