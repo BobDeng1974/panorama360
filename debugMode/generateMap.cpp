@@ -45,6 +45,8 @@ struct buffer
 
 struct buffer * buffers=NULL;
 
+//separate the initial image into four small images
+//
 int separateImage(IplImage* im1,IplImage* im2,IplImage* im3,IplImage* im4,unsigned char * pbigImage)
 {
 	for(int i=0;i<480;i++)
@@ -57,7 +59,7 @@ int separateImage(IplImage* im1,IplImage* im2,IplImage* im3,IplImage* im4,unsign
 	return 0;
 }
 
-
+//combine four small images into a big image
 int combineImage(IplImage* im1,IplImage* im2,IplImage* im3,IplImage* im4,unsigned char *pbigimage)
 {
 	for(int i=0;i<480;i++)
@@ -70,6 +72,7 @@ int combineImage(IplImage* im1,IplImage* im2,IplImage* im3,IplImage* im4,unsigne
 	return 0;
 }
 
+//YUV(nv12)ToARGB
 int nv12toargb(int w,int h,unsigned int pnv,unsigned int potherad)
 {
 	tmp.flag               =G2D_BLT_FLIP_HORIZONTAL;
